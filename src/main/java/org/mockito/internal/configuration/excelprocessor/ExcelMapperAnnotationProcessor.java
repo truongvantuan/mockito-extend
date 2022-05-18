@@ -40,11 +40,11 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
 
         Map<Class<?>, Method> subClsSetterMap = isCombineObjectType(rootCls);
 
-        if (subClsSetterMap != null) {
+        if (!subClsSetterMap.isEmpty()) {
             String subSheetIndex = annotation.subSheet();
             Class subCls = subClsSetterMap.keySet().stream().findFirst().get();
             Object subObj = subObjectExcelMapping(subCls, subSheetIndex);
-            result = mapper.map(rootCls, sheetIndex);
+            result = mapper.map(rootCls, sheetIndex).get(0);
             subClsSetterMap.get(subCls).invoke(result, subObj);
             return result;
         }
@@ -61,19 +61,21 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
     }
 
     public Map<Class<?>, Method> isCombineObjectType(Class cls) throws IntrospectionException {
-        Field[] fields = cls.getFields();
-        Map<Class<?>, Method> subClsSetter = new HashMap<>();
+        Field[] fields = cls.getDeclaredFields();
+        Map<Class<?>, Method> subClsSetterMap = new HashMap<>();
         for (Field f : fields) {
             if (Collection.class.isAssignableFrom(f.getType())) {
                 PropertyDescriptor[] descriptor = Introspector.getBeanInfo(cls).getPropertyDescriptors();
                 for (PropertyDescriptor p : descriptor) {
-                    if (p.getPropertyType().getName().equals(f.getClass().getName())) {
-                        subClsSetter.put(f.getClass(), p.getWriteMethod());
+                    if (p.getName().equals(f.getName())) {
+                        ParameterizedType pType = (ParameterizedType) f.getGenericType();
+                        Class<?> aClass = (Class<?>) pType.getActualTypeArguments()[0];
+                        subClsSetterMap.put(aClass, p.getWriteMethod());
                     }
                 }
             }
         }
-        return null;
+        return subClsSetterMap;
     }
 
     public Object subObjectExcelMapping(Class<?> cls, String sheetIndex) throws Exception {
