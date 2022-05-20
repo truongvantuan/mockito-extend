@@ -13,6 +13,4 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 @Documented
 public @interface ExcelMapper {
     String sheetIndex();
-    boolean parameterizedType() default false;
-    String subSheet() default "";
 }

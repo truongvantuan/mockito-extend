@@ -1,5 +1,11 @@
 package org.mockito.internal.configuration.excelprocessor;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
+import org.apache.commons.collections4.MultiMap;
+import org.apache.commons.collections4.MultiValuedMap;
+import org.apache.commons.collections4.map.MultiValueMap;
+import org.apache.commons.collections4.multimap.ArrayListValuedHashMap;
 import org.mockito.internal.configuration.FieldAnnotationProcessor;
 import org.mockito.internal.configuration.excelprocessor.datasource.ExcelFile;
 
@@ -7,11 +13,10 @@ import java.beans.IntrospectionException;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<ExcelMapper> {
 
@@ -34,19 +39,28 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
     public Object processAnnotationForExcelMapper(ExcelMapper annotation, Field field) throws Exception {
         mapper = new ExcelToObjectMapper(FILE_PATH);
         sheetIndex = annotation.sheetIndex();
-        subSheet = annotation.subSheet();
-        Object result;
+        String subSheetIndex;
         Class rootCls = (Class) field.getAnnotatedType().getType();
+        Multimap<Class<?>, Method> subClsSetterMap = isCollectionType(rootCls);
 
-        Map<Class<?>, Method> subClsSetterMap = isCombineObjectType(rootCls);
-
+        /**
+         * Check that annotated field is including collection inside
+         */
         if (!subClsSetterMap.isEmpty()) {
-            String subSheetIndex = annotation.subSheet();
-            Class subCls = subClsSetterMap.keySet().stream().findFirst().get();
-            Object subObj = subObjectExcelMapping(subCls, subSheetIndex);
-            result = mapper.map(rootCls, sheetIndex).get(0);
-            subClsSetterMap.get(subCls).invoke(result, subObj);
-            return result;
+            Object rootObj = mapper.map(rootCls, sheetIndex).get(0);
+            for (Class<?> subCls : subClsSetterMap.keySet()) {
+                subSheetIndex = subCls.getSimpleName();
+                Object subObj = subObjectExcelMapping(subCls, subSheetIndex);
+                Object finalResult = rootObj;
+                subClsSetterMap.get(subCls).forEach(method -> {
+                    try {
+                        method.invoke(finalResult, subObj);
+                    } catch (IllegalAccessException | InvocationTargetException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+            }
+            return rootObj;
         }
 
         if (Collection.class.isAssignableFrom(field.getType())) {
@@ -55,17 +69,24 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
             return mapper.map(cls, sheetIndex);
         }
         Class<?> cls = (Class<?>) field.getAnnotatedType().getType();
-
-
         return mapper.map(cls, sheetIndex).get(0);
     }
 
-    public Map<Class<?>, Method> isCombineObjectType(Class cls) throws IntrospectionException {
-        Field[] fields = cls.getDeclaredFields();
-        Map<Class<?>, Method> subClsSetterMap = new HashMap<>();
+    /**
+     * Check
+     *
+     * @param cls
+     * @return
+     * @throws IntrospectionException
+     */
+    public Multimap<Class<?>, Method> isCollectionType(Class cls) throws IntrospectionException {
+        Multimap<Class<?>, Method> subClsSetterMap = ArrayListMultimap.create();
+        Field[] fields = cls.getDeclaredFields(); // get all Fields of a Class
+        List<PropertyDescriptor> descriptor = new ArrayList<>(List.of(Introspector.getBeanInfo(cls).getPropertyDescriptors()));
+
         for (Field f : fields) {
             if (Collection.class.isAssignableFrom(f.getType())) {
-                PropertyDescriptor[] descriptor = Introspector.getBeanInfo(cls).getPropertyDescriptors();
+                // get all PropertyDescriptor (field & getter & setter) of a Class
                 for (PropertyDescriptor p : descriptor) {
                     if (p.getName().equals(f.getName())) {
                         ParameterizedType pType = (ParameterizedType) f.getGenericType();
@@ -75,6 +96,7 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
                 }
             }
         }
+
         return subClsSetterMap;
     }
 
