@@ -2,10 +2,6 @@ package org.mockito.internal.configuration.excelprocessor;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
-import org.apache.commons.collections4.MultiMap;
-import org.apache.commons.collections4.MultiValuedMap;
-import org.apache.commons.collections4.map.MultiValueMap;
-import org.apache.commons.collections4.multimap.ArrayListValuedHashMap;
 import org.mockito.internal.configuration.FieldAnnotationProcessor;
 import org.mockito.internal.configuration.excelprocessor.datasource.ExcelFile;
 
@@ -16,13 +12,14 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<ExcelMapper> {
 
-    private String sheetIndex;
-    private String subSheet;
-    private String FILE_PATH = ExcelFile.getFilePath();
+    private final String FILE_PATH = ExcelFile.getFilePath();
     private ExcelToObjectMapper mapper;
 
     @Override
@@ -38,23 +35,23 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
 
     public Object processAnnotationForExcelMapper(ExcelMapper annotation, Field field) throws Exception {
         mapper = new ExcelToObjectMapper(FILE_PATH);
-        sheetIndex = annotation.sheetIndex();
-        String subSheetIndex;
-        Class rootCls = (Class) field.getAnnotatedType().getType();
-        Multimap<Class<?>, Method> subClsSetterMap = isCollectionType(rootCls);
+        String sheetIndex = annotation.sheetIndex();
+        Class<?> rootCls = (Class<?>) field.getAnnotatedType().getType();
+        Multimap<Class<?>, Method> subClsSetterMap = isCollectionFieldInside(rootCls);
 
         /**
-         * Check that annotated field is including collection inside
+         * Excel mapping for annotated field is including collection inside
          */
         if (!subClsSetterMap.isEmpty()) {
             Object rootObj = mapper.map(rootCls, sheetIndex).get(0);
             for (Class<?> subCls : subClsSetterMap.keySet()) {
-                subSheetIndex = subCls.getSimpleName();
-                Object subObj = subObjectExcelMapping(subCls, subSheetIndex);
-                Object finalResult = rootObj;
+                String subSheetIndex = subCls.getSimpleName();
+                List<?> subObj = subObjectExcelMapping(subCls, subSheetIndex);
                 subClsSetterMap.get(subCls).forEach(method -> {
                     try {
-                        method.invoke(finalResult, subObj);
+                        if (method.getName().contains("List"))
+                            method.invoke(rootObj, subObj);
+                        else method.invoke(rootObj, subObj.get(0));
                     } catch (IllegalAccessException | InvocationTargetException e) {
                         throw new RuntimeException(e);
                     }
@@ -63,30 +60,23 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
             return rootObj;
         }
 
-        if (Collection.class.isAssignableFrom(field.getType())) {
-            ParameterizedType pType = (ParameterizedType) field.getGenericType();
-            Class<?> cls = (Class<?>) pType.getActualTypeArguments()[0];
-            return mapper.map(cls, sheetIndex);
-        }
-        Class<?> cls = (Class<?>) field.getAnnotatedType().getType();
-        return mapper.map(cls, sheetIndex).get(0);
+        return mapper.map(rootCls, sheetIndex).get(0);
     }
 
     /**
-     * Check
+     * Checking a Class is including a Field that is Collection
      *
-     * @param cls
-     * @return
+     * @param cls Class to check
+     * @return Map with Key is Class type, Value is Setter method
      * @throws IntrospectionException
      */
-    public Multimap<Class<?>, Method> isCollectionType(Class cls) throws IntrospectionException {
+    public Multimap<Class<?>, Method> isCollectionFieldInside(Class<?> cls) throws IntrospectionException {
         Multimap<Class<?>, Method> subClsSetterMap = ArrayListMultimap.create();
         Field[] fields = cls.getDeclaredFields(); // get all Fields of a Class
-        List<PropertyDescriptor> descriptor = new ArrayList<>(List.of(Introspector.getBeanInfo(cls).getPropertyDescriptors()));
-
+        List<PropertyDescriptor> descriptor = new ArrayList<>();
+        Collections.addAll(descriptor, Introspector.getBeanInfo(cls).getPropertyDescriptors()); // get all PropertyDescriptor (field & getter & setter) of a Class// get all PropertyDescriptor (field & getter & setter) of a Class
         for (Field f : fields) {
             if (Collection.class.isAssignableFrom(f.getType())) {
-                // get all PropertyDescriptor (field & getter & setter) of a Class
                 for (PropertyDescriptor p : descriptor) {
                     if (p.getName().equals(f.getName())) {
                         ParameterizedType pType = (ParameterizedType) f.getGenericType();
@@ -94,13 +84,22 @@ public class ExcelMapperAnnotationProcessor implements FieldAnnotationProcessor<
                         subClsSetterMap.put(aClass, p.getWriteMethod());
                     }
                 }
+            } else if (isInfoproClass(f.getType())) {
+                for (PropertyDescriptor p : descriptor) {
+                    if (p.getName().equals(f.getName())) {
+                        subClsSetterMap.put(f.getType(), p.getWriteMethod());
+                    }
+                }
             }
         }
-
         return subClsSetterMap;
     }
 
-    public Object subObjectExcelMapping(Class<?> cls, String sheetIndex) throws Exception {
+    public List<?> subObjectExcelMapping(Class<?> cls, String sheetIndex) throws Exception {
         return mapper.map(cls, sheetIndex);
+    }
+
+    private boolean isInfoproClass(Class<?> cls) {
+        return cls.getName().startsWith("com.infopro");
     }
 }

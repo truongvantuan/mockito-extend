@@ -78,7 +78,17 @@ public class ExcelToObjectMapper {
     private void setObjectFieldValueFromCell(Object obj, Field field, Cell cell) {
         Class<?> cls = field.getType();
         field.setAccessible(true);
-        if (cls == String.class) {
+        if (cls == char.class) {
+            try {
+                field.set(obj, cell.getStringCellValue().charAt(0));
+            } catch (Exception e) {
+                try {
+                    field.set(obj, null);
+                } catch (IllegalAccessException e1) {
+                    e1.printStackTrace();
+                }
+            }
+        } else if (cls == String.class) {
             try {
                 field.set(obj, cell.getStringCellValue());
             } catch (Exception e) {
@@ -133,8 +143,7 @@ public class ExcelToObjectMapper {
                     e1.printStackTrace();
                 }
             }
-        } else if (cls == Collection.class) {
-            double value = cell.getNumericCellValue();
+        } else if (Collection.class.isAssignableFrom(cls)) {
             try {
                 field.set(obj, null);
             } catch (Exception e) {
@@ -144,7 +153,7 @@ public class ExcelToObjectMapper {
                     e1.printStackTrace();
                 }
             }
-        } else if (isCustomObject(cls)) {
+        } else if (isInfoproClass(cls)) {
             try {
                 field.set(obj, null);
             } catch (Exception e) {
@@ -180,8 +189,8 @@ public class ExcelToObjectMapper {
 
     }
 
-    private boolean isCustomObject(Class<?> cls) {
-        return !cls.getName().startsWith("java.lang");
+    private boolean isInfoproClass(Class<?> cls) {
+        return cls.getName().startsWith("com.infopro");
     }
 
     /**
@@ -211,7 +220,7 @@ public class ExcelToObjectMapper {
         int index = -1;
         for (index = 0; index < totalColumns; index++) {
             Cell cell = sheet.getRow(0).getCell(index);
-            if (cell.getStringCellValue().toLowerCase().equals(headerName.toLowerCase())) {
+            if (cell.getStringCellValue().equalsIgnoreCase(headerName)) {
                 break;
             }
         }
